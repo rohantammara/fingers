@@ -1,0 +1,21 @@
+[package]
+name = "fingers"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+# Webcam controller
+nokhwa = { version = "0.10", features = ["input-native"] }
+
+# AI Runtime
+ort = { version = "2.0.0-rc.11" }
+
+# Input simulation
+enigo = "0.3"
+
+# Error handling
+anyhow = "1.0"
+
+# FrameBuffer Handler
+minifb = "0.24"
