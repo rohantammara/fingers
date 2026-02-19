@@ -8,6 +8,9 @@ edition = "2024"
 # Webcam controller
 nokhwa = { version = "0.10", features = ["input-native"] }
 
+# N-dim Array
+ndarray = { version = "0.17.2", default-features = false }
+
 # AI Runtime
 ort = { version = "2.0.0-rc.11" }
 
@@ -19,3 +22,5 @@ anyhow = "1.0"
 
 # FrameBuffer Handler
 minifb = "0.24"
+image = "0.25.9"
+
