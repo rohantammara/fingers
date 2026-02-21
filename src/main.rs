@@ -11,6 +11,10 @@ use controller::input_device;
 mod detector;
 use detector::{gesture_detector, gesture_detector::Gesture, hand_detector};
 
+const MODEL_BYTES: &[u8] = include_bytes!("../models/MediaPipeHandDetector.onnx");
+const GREEN: u32 = 0x00FF00;
+const BLUE: u32 = 0x0000FF;
+
 fn main() -> anyhow::Result<()> {
     // Start camera
     let mut camera = webcam::setup()?;
@@ -39,7 +43,7 @@ fn main() -> anyhow::Result<()> {
     // let mut input_controller = input_device::create()?;
 
     // Load detector model
-    let mut detector = hand_detector::HandDetector::new("models/MediaPipeHandDetector.onnx")?;
+    let mut detector = hand_detector::HandDetector::new_embedded(MODEL_BYTES)?;
 
     // THE WINDOW UPDATE LOOP
     while window.is_open() && !window.is_key_down(Key::Escape) {
@@ -113,7 +117,7 @@ fn main() -> anyhow::Result<()> {
                 .clamp(0, window_height as i32 - 1);
 
             // --- Draw the Bounding Box (Green: 0x00FF00) ---
-            let box_color = 0x00FF00;
+            let box_color = GREEN;
 
             // Horizontal lines (top and bottom)
             for x in p_xmin..=p_xmax {
@@ -127,7 +131,7 @@ fn main() -> anyhow::Result<()> {
             }
 
             // --- Draw the Wrist Point (Blue) Dot) ---
-            let dot_color = 0x0000FF;
+            let dot_color = BLUE;
             let radius = 10;
             for dy in -radius..=radius {
                 for dx in -radius..=radius {

@@ -130,6 +130,15 @@ pub mod hand_detector {
             Ok(Self { session })
         }
 
+        pub fn new_embedded(model_bytes: &[u8]) -> Result<Self> {
+            let session = Session::builder()?
+                .with_optimization_level(GraphOptimizationLevel::Level3)?
+                .with_intra_threads(4)?
+                .commit_from_memory(model_bytes)?;
+
+            Ok(Self { session })
+        }
+
         pub fn detect(
             &mut self,
             frame: &ImageBuffer<Rgb<u8>, Vec<u8>>,
@@ -198,7 +207,7 @@ pub mod hand_detector {
             }
 
             // Threshold check: If the score is too low, no hand is visible
-            let threshold = 0.7 as f32;
+            let threshold = 1.0 as f32;
             if max_score < threshold {
                 println!("No hand detected");
                 return Ok(None);
