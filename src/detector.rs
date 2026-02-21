@@ -9,8 +9,15 @@ pub mod hand_detector {
         session: Session,
     }
 
+    struct Anchor {
+        x_center: f32,
+        y_center: f32,
+        w: f32,
+        h: f32,
+    }
+
     #[derive(Debug, Clone, Copy)]
-    pub struct BoundingBox {
+    pub struct Box {
         pub xmin: f32,
         pub ymin: f32,
         pub xmax: f32,
@@ -18,15 +25,99 @@ pub mod hand_detector {
     }
 
     #[derive(Debug, Clone, Copy)]
-    pub struct WristCoords {
+    pub struct Landmark {
         pub x: f32,
         pub y: f32,
     }
 
     #[derive(Debug, Clone, Copy)]
     pub struct HandDetails {
-        pub bbox: BoundingBox,
-        pub wrist: WristCoords,
+        pub score: f32,
+        pub bbox: Box,
+        pub wrist: Landmark,
+    }
+
+    fn generate_anchors(num_anchors: usize) -> Vec<Anchor> {
+        let mut anchors = Vec::with_capacity(num_anchors);
+
+        let strides = [8, 16, 32, 32];
+        let map_sizes = [32, 16, 8, 8];
+        let anchors_per_cell = [2, 2, 2, 6];
+
+        for i in 0..strides.len() {
+            let stride = strides[i] as f32;
+            let map_size = map_sizes[i];
+
+            for y in 0..map_size {
+                for x in 0..map_size {
+                    for _ in 0..anchors_per_cell[i] {
+                        anchors.push(Anchor {
+                            // Normalize to 0 to 1
+                            x_center: (x as f32 + 0.5) * stride / 256.0,
+                            y_center: (y as f32 + 0.5) * stride / 256.0,
+                            w: 1.0,
+                            h: 1.0,
+                        });
+                    }
+                }
+            }
+        }
+        anchors
+    }
+
+    fn get_bbox(
+        best_score_idx: usize,
+        coords: &ndarray::ArrayView3<f32>,
+        anchors: &[Anchor],
+    ) -> Box {
+        // 1. Extract the raw regression values
+        let dx = coords[[0, best_score_idx, 0]];
+        let dy = coords[[0, best_score_idx, 1]];
+        let dw = coords[[0, best_score_idx, 2]];
+        let dh = coords[[0, best_score_idx, 3]];
+
+        // 2. Get the corresponding anchor
+        let anchor = &anchors[best_score_idx];
+
+        // 3. Apply the MediaPipe Scale (Standard is 256.0 for 256x256 input)
+        // This transforms the raw offsets into normalized coordinates (0.0 to 1.0)
+        let center_x = (dx / 256.0) * anchor.w + anchor.x_center;
+        let center_y = (dy / 256.0) * anchor.h + anchor.y_center;
+        let w = (dw / 256.0) * anchor.w;
+        let h = (dh / 256.0) * anchor.h;
+
+        // 4. Return as a Bounding Box (top-left and bottom-right)
+        Box {
+            xmin: center_x - (w / 2.0),
+            ymin: center_y - (h / 2.0),
+            xmax: center_x + (w / 2.0),
+            ymax: center_y + (h / 2.0),
+        }
+    }
+
+    fn get_landmark(
+        best_score_idx: usize,
+        coords: &ndarray::ArrayView3<f32>,
+        anchors: &[Anchor],
+        coords_x_idx: usize,
+        coords_y_idx: usize,
+    ) -> Landmark {
+        // 1. Extract the raw regression values
+        let x = coords[[0, best_score_idx, coords_x_idx]];
+        let y = coords[[0, best_score_idx, coords_y_idx]];
+
+        // 2. Get the corresponding anchor
+        let anchor = &anchors[best_score_idx];
+
+        // 3. Apply the MediaPipe Scale (Standard is 256.0 for 256x256 input)
+        // This transforms the raw offsets into normalized coordinates (0.0 to 1.0)
+        let landmark_x = ((x / 256.0) * anchor.w + anchor.x_center) * 256.0;
+        let landmark_y = ((y / 256.0) * anchor.h + anchor.y_center) * 256.0;
+
+        Landmark {
+            x: landmark_x,
+            y: landmark_y,
+        }
     }
 
     impl HandDetector {
@@ -91,54 +182,46 @@ pub mod hand_detector {
 
             // Find the anchor with the best score (Argmax over all candidates and classes)
             let mut max_score = 0.0;
-            let mut best_idx = 0;
+            let mut best_score_idx = 0;
 
             let num_anchors = scores.shape()[1];
+
+            // Generate array of all anchors
+            let all_anchors = generate_anchors(num_anchors);
 
             for i in 0..num_anchors {
                 let score = scores[[0, i, 0]];
                 if score > max_score {
                     max_score = score;
-                    best_idx = i;
+                    best_score_idx = i;
                 }
             }
 
             // Threshold check: If the score is too low, no hand is visible
-            if max_score < 0.65 {
+            let threshold = 0.7 as f32;
+            if max_score < threshold {
                 println!("No hand detected");
                 return Ok(None);
             }
 
             // Extract details for the best index //
-            // Get bounding box and wrist coords
-            let [mut ymin, xmin, mut ymax, xmax] = [0, 1, 2, 3].map(|i| coords[[0, best_idx, i]]);
+            // Get bounding box for palm
+            let mut bbox = get_bbox(best_score_idx, &coords, &all_anchors);
             // Get the first keypoint (wrist)
-            let [mut wrist_y, wrist_x] = [4, 5].map(|i| coords[[0, best_idx, i]]);
-
-            println!(
-                "Raw output: bbox: {} {} {} {} | wrist: {} {}",
-                xmin, ymin, xmax, ymax, wrist_x, wrist_y
-            );
+            let mut wrist = get_landmark(best_score_idx, &coords, &all_anchors, 4, 5);
 
             // Normalize the y coordinates to the original frame aspect ratio (since only black bars added to y-dimension)
             let normalized_padding = top_padding as f32 / target_size as f32;
             let normalized_content_height = new_height as f32 / target_size as f32;
 
-            [ymin, ymax, wrist_y] =
-                [ymin, ymax, wrist_y].map(|i| (i - normalized_padding) / normalized_content_height);
+            [bbox.ymin, bbox.ymax, wrist.y] = [bbox.ymin, bbox.ymax, wrist.y]
+                .map(|i| (i - normalized_padding) / normalized_content_height);
 
             // Return Hand Details
             Ok(Some(HandDetails {
-                bbox: BoundingBox {
-                    xmin: xmin,
-                    ymin: ymin,
-                    xmax: xmax,
-                    ymax: ymax,
-                },
-                wrist: WristCoords {
-                    x: wrist_x,
-                    y: wrist_y,
-                },
+                score: max_score,
+                bbox: bbox,
+                wrist: wrist,
             }))
         }
     }

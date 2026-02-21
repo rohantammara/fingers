@@ -28,10 +28,10 @@ fn main() -> anyhow::Result<()> {
     )?;
 
     // Pre-allocate the pixel buffer to avoid allocating a new vector every frame (Performance)
-    let mut buffer_u32 = vec![0u32; window_width * window_height];
+    let mut window_buffer = vec![0u32; window_width * window_height];
 
     // Limit fps to reduce CPU usage and potential instability
-    let fps = 30;
+    let fps = 24;
     let duration_per_frame = Duration::from_micros(1000000 / fps as u64);
     window.limit_update_rate(Some(duration_per_frame));
 
@@ -58,7 +58,7 @@ fn main() -> anyhow::Result<()> {
             image::imageops::FilterType::Nearest,
         );
 
-        let raw_data = resized_frame.as_raw();
+        let resized_frame_raw = resized_frame.as_raw();
 
         // Pixel Conversion //
         // The camera gives us a long list of u8 bytes: [R, G, B, R, G, B...]
@@ -66,29 +66,29 @@ fn main() -> anyhow::Result<()> {
         // We must map them.
 
         // Sanity check buffer size matches window dimensions
-        if raw_data.len() != window_width * window_height * 3 {
+        if resized_frame_raw.len() != window_width * window_height * 3 {
             eprintln!(
                 "Buffer size mismatch: Expected {}, got {}",
                 window_width * window_height * 3,
-                raw_data.len()
+                resized_frame_raw.len()
             );
             continue;
         }
 
         // Efficiently update the pre-allocated buffer
-        for (i, chunk) in raw_data.chunks_exact(3).enumerate() {
+        for (i, chunk) in resized_frame_raw.chunks_exact(3).enumerate() {
             let r = chunk[0] as u32;
             let g = chunk[1] as u32;
             let b = chunk[2] as u32;
-            buffer_u32[i] = (r << 16) | (g << 8) | b;
+            window_buffer[i] = (r << 16) | (g << 8) | b;
         }
 
         // Pass the frame through the detector and get detector results
         if let Ok(Some(details)) = detector.detect(&resized_frame) {
             // Hand Tracking //
-
             println!(
-                "Normal/Adjusted: bbox: {} {} {} {} | wrist: {} {}",
+                "Hand detected >> score: {} | bbox: ({} {}) ({} {}) | wrist: ({} {})",
+                details.score,
                 details.bbox.xmin,
                 details.bbox.ymin,
                 details.bbox.xmax,
@@ -112,41 +112,36 @@ fn main() -> anyhow::Result<()> {
             let p_wrist_y = ((details.wrist.y * window_height as f32) as i32)
                 .clamp(0, window_height as i32 - 1);
 
-            println!(
-                "Pixel scaled: bbox: {} {} {} {} | wrist: {} {}",
-                p_xmin, p_ymin, p_xmax, p_ymax, p_wrist_x, p_wrist_y
-            );
-
             // --- Draw the Bounding Box (Green: 0x00FF00) ---
             let box_color = 0x00FF00;
 
             // Horizontal lines (top and bottom)
             for x in p_xmin..=p_xmax {
-                buffer_u32[(p_ymin as usize * window_width) + x as usize] = box_color;
-                buffer_u32[(p_ymax as usize * window_width) + x as usize] = box_color;
+                window_buffer[(p_ymin as usize * window_width) + x as usize] = box_color;
+                window_buffer[(p_ymax as usize * window_width) + x as usize] = box_color;
             }
             // Vertical lines (left and right)
             for y in p_ymin..=p_ymax {
-                buffer_u32[(y as usize * window_width) + p_xmin as usize] = box_color;
-                buffer_u32[(y as usize * window_width) + p_xmax as usize] = box_color;
+                window_buffer[(y as usize * window_width) + p_xmin as usize] = box_color;
+                window_buffer[(y as usize * window_width) + p_xmax as usize] = box_color;
             }
 
             // --- Draw the Wrist Point (Blue) Dot) ---
             let dot_color = 0x0000FF;
-            let radius = 3;
+            let radius = 10;
             for dy in -radius..=radius {
                 for dx in -radius..=radius {
                     let rx = p_wrist_x + dx;
                     let ry = p_wrist_y + dy;
                     if rx >= 0 && rx < window_width as i32 && ry >= 0 && ry < window_height as i32 {
-                        buffer_u32[(ry as usize * window_width) + rx as usize] = dot_color;
+                        window_buffer[(ry as usize * window_width) + rx as usize] = dot_color;
                     }
                 }
             }
-
-            // Draw to Window //
-            window.update_with_buffer(&buffer_u32, window_width, window_height)?;
         }
+
+        // Draw to Window //
+        window.update_with_buffer(&window_buffer, window_width, window_height)?;
     }
 
     Ok(())
