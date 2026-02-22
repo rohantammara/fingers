@@ -6,12 +6,13 @@ use std::time::Duration;
 
 mod sensor;
 use sensor::webcam;
+mod detector;
+use detector::hand_detector;
 mod controller;
 use controller::input_device;
-mod detector;
-use detector::{gesture_detector, gesture_detector::Gesture, hand_detector};
 
 const MODEL_BYTES: &[u8] = include_bytes!("../models/MediaPipeHandDetector.onnx");
+const RED: u32 = 0xFF0000;
 const GREEN: u32 = 0x00FF00;
 const BLUE: u32 = 0x0000FF;
 
@@ -44,6 +45,11 @@ fn main() -> anyhow::Result<()> {
 
     // Load detector model
     let mut detector = hand_detector::HandDetector::new_embedded(MODEL_BYTES)?;
+
+    // Define closure to convert normalised coordinates to pixel coordinates in window
+    let in_window_px = |l: f32, window_dim_size: usize| {
+        ((l * window_dim_size as f32) as i32).clamp(0, window_dim_size as i32 - 1)
+    };
 
     // THE WINDOW UPDATE LOOP
     while window.is_open() && !window.is_key_down(Key::Escape) {
@@ -88,57 +94,56 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Pass the frame through the detector and get detector results
-        if let Ok(Some(details)) = detector.detect(&resized_frame) {
-            // Hand Tracking //
-            println!(
-                "Hand detected >> score: {} | bbox: ({} {}) ({} {}) | wrist: ({} {})",
-                details.score,
-                details.bbox.xmin,
-                details.bbox.ymin,
-                details.bbox.xmax,
-                details.bbox.ymax,
-                details.wrist.x,
-                details.wrist.y
-            );
+        if let Ok(Some(hands)) = detector.detect(&resized_frame) {
+            for details in hands {
+                // Hand Tracking //
+                println!(
+                    "Hand detected >> score: {} | bbox: ({} {}) ({} {}) | wrist: ({} {})",
+                    details.score,
+                    details.bbox.xmin,
+                    details.bbox.ymin,
+                    details.bbox.xmax,
+                    details.bbox.ymax,
+                    details.wrist.x,
+                    details.wrist.y
+                );
 
-            // Convert normalized coordinates to pixel coordinates
-            let p_xmin = ((details.bbox.xmin * window_width as f32) as i32)
-                .clamp(0, window_width as i32 - 1);
-            let p_ymin = ((details.bbox.ymin * window_height as f32) as i32)
-                .clamp(0, window_height as i32 - 1);
-            let p_xmax = ((details.bbox.xmax * window_width as f32) as i32)
-                .clamp(0, window_width as i32 - 1);
-            let p_ymax = ((details.bbox.ymax * window_height as f32) as i32)
-                .clamp(0, window_height as i32 - 1);
+                // Convert normalized coordinates to pixel coordinates
+                let [p_xmin, p_xmax, p_wrist_x] =
+                    [details.bbox.xmin, details.bbox.xmax, details.wrist.x]
+                        .map(|x| in_window_px(x, window_width));
+                let [p_ymin, p_ymax, p_wrist_y] =
+                    [details.bbox.ymin, details.bbox.ymax, details.wrist.y]
+                        .map(|x| in_window_px(x, window_height));
 
-            let p_wrist_x =
-                ((details.wrist.x * window_width as f32) as i32).clamp(0, window_width as i32 - 1);
-            let p_wrist_y = ((details.wrist.y * window_height as f32) as i32)
-                .clamp(0, window_height as i32 - 1);
+                // --- Draw the Bounding Box (Green: 0x00FF00) ---
+                let box_color = GREEN;
 
-            // --- Draw the Bounding Box (Green: 0x00FF00) ---
-            let box_color = GREEN;
+                // Horizontal lines (top and bottom)
+                for x in p_xmin..=p_xmax {
+                    window_buffer[(p_ymin as usize * window_width) + x as usize] = box_color;
+                    window_buffer[(p_ymax as usize * window_width) + x as usize] = box_color;
+                }
+                // Vertical lines (left and right)
+                for y in p_ymin..=p_ymax {
+                    window_buffer[(y as usize * window_width) + p_xmin as usize] = box_color;
+                    window_buffer[(y as usize * window_width) + p_xmax as usize] = box_color;
+                }
 
-            // Horizontal lines (top and bottom)
-            for x in p_xmin..=p_xmax {
-                window_buffer[(p_ymin as usize * window_width) + x as usize] = box_color;
-                window_buffer[(p_ymax as usize * window_width) + x as usize] = box_color;
-            }
-            // Vertical lines (left and right)
-            for y in p_ymin..=p_ymax {
-                window_buffer[(y as usize * window_width) + p_xmin as usize] = box_color;
-                window_buffer[(y as usize * window_width) + p_xmax as usize] = box_color;
-            }
-
-            // --- Draw the Wrist Point (Blue) Dot) ---
-            let dot_color = BLUE;
-            let radius = 10;
-            for dy in -radius..=radius {
-                for dx in -radius..=radius {
-                    let rx = p_wrist_x + dx;
-                    let ry = p_wrist_y + dy;
-                    if rx >= 0 && rx < window_width as i32 && ry >= 0 && ry < window_height as i32 {
-                        window_buffer[(ry as usize * window_width) + rx as usize] = dot_color;
+                // --- Draw the Wrist Point (Blue) Dot) ---
+                let dot_color = BLUE;
+                let radius = 3;
+                for dy in -radius..=radius {
+                    for dx in -radius..=radius {
+                        let rx = p_wrist_x + dx;
+                        let ry = p_wrist_y + dy;
+                        if rx >= 0
+                            && rx < window_width as i32
+                            && ry >= 0
+                            && ry < window_height as i32
+                        {
+                            window_buffer[(ry as usize * window_width) + rx as usize] = dot_color;
+                        }
                     }
                 }
             }
