@@ -34,7 +34,7 @@ The project is modularized to separate hardware sensing, AI inference, and OS-le
 
 1.  Clone the repository:
     ```bash
-    git clone [https://github.com/your-username/fingers.git](https://github.com/your-username/fingers.git)
+    git clone [https://github.com/rohantammara/fingers.git](https://github.com/rohantammara/fingers.git)
     cd fingers
     ```
 2.  Place your MediaPipe ONNX model in the `models/` directory:
