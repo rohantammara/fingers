@@ -5,6 +5,9 @@ pub mod hand_detector {
     use ort::{inputs, session::Session, session::builder::GraphOptimizationLevel, value::Value};
     use std::path::Path;
 
+    const INPUT_SIZE: f32 = 256.0;
+    const NUM_ANCHORS: usize = 2944;
+
     pub struct HandDetector {
         session: Session,
         anchors: Vec<Anchor>,
@@ -54,8 +57,8 @@ pub mod hand_detector {
                     for _ in 0..anchors_per_cell[i] {
                         anchors.push(Anchor {
                             // Normalize to 0 to 1
-                            x_center: (x as f32 + 0.5) * stride / 256.0,
-                            y_center: (y as f32 + 0.5) * stride / 256.0,
+                            x_center: (x as f32 + 0.5) * stride / INPUT_SIZE,
+                            y_center: (y as f32 + 0.5) * stride / INPUT_SIZE,
                             w: 1.0,
                             h: 1.0,
                         });
@@ -82,10 +85,10 @@ pub mod hand_detector {
 
         // Apply the MediaPipe Scale (Standard is 256.0 for 256x256 input)
         // This transforms the raw offsets into normalized coordinates (0.0 to 1.0)
-        let center_x = (dx / 256.0) * anchor.w + anchor.x_center;
-        let center_y = (dy / 256.0) * anchor.h + anchor.y_center;
-        let w = (dw / 256.0) * anchor.w;
-        let h = (dh / 256.0) * anchor.h;
+        let center_x = (dx / INPUT_SIZE) * anchor.w + anchor.x_center;
+        let center_y = (dy / INPUT_SIZE) * anchor.h + anchor.y_center;
+        let w = (dw / INPUT_SIZE) * anchor.w;
+        let h = (dh / INPUT_SIZE) * anchor.h;
 
         // Return as a Bounding Box (top-left and bottom-right)
         Box {
@@ -112,8 +115,8 @@ pub mod hand_detector {
 
         // Apply the MediaPipe Scale (Standard is 256.0 for 256x256 input)
         // This transforms the raw offsets into normalized coordinates (0.0 to 1.0)
-        let landmark_x = (x / 256.0) * anchor.w + anchor.x_center;
-        let landmark_y = (y / 256.0) * anchor.h + anchor.y_center;
+        let landmark_x = (x / INPUT_SIZE) * anchor.w + anchor.x_center;
+        let landmark_y = (y / INPUT_SIZE) * anchor.h + anchor.y_center;
 
         Landmark {
             x: landmark_x,
@@ -161,7 +164,7 @@ pub mod hand_detector {
                 .commit_from_file(model_path)?;
 
             // Generate array of all anchors
-            let anchors = generate_anchors(2944);
+            let anchors = generate_anchors(NUM_ANCHORS);
 
             Ok(Self { session, anchors })
         }
@@ -174,7 +177,7 @@ pub mod hand_detector {
                 .commit_from_memory(model_bytes)?;
 
             // Generate array of all anchors
-            let anchors = generate_anchors(2944);
+            let anchors = generate_anchors(NUM_ANCHORS);
 
             Ok(Self { session, anchors })
         }
@@ -186,7 +189,7 @@ pub mod hand_detector {
             // Preprocessing: Resize the image to what the model expects
             // (letterbox image to fix aspect ratio without cropping or stretching)
 
-            let target_size = 256;
+            let target_size = INPUT_SIZE as u32;
 
             let mut canvas = ImageBuffer::from_pixel(target_size, target_size, Rgb([0, 0, 0]));
 
